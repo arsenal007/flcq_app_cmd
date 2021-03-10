@@ -1,2 +1,2 @@
 # flcq_app_cmd
-flcq command line tool
+Simple Frequency (F) Inductance (L) Capacitance (C) Crystal (Q) command line tool.
