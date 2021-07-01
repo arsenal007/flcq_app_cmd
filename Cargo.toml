@@ -1,0 +1,27 @@
+[package]
+name = "flcq"
+version = "0.1.1"
+authors = ["arsenal007 <fc_arsenal@ukr.net>"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+#pancurses = "0.16"
+version = "3.*.*"
+#serialport = { git = "https://gitlab.com/susurrus/serialport-rs" }
+question = "0.2.2"
+
+
+serialport = "4.0.0"
+rustop = "1.1.1"
+clap = "*"
+find_folder="0.3.0"
+dirs = "2.0"
+#[dependencies.gtk]
+#version = "0.8.1"
+#features = ["v3_16"]
+
+#[dependencies.gio]
+#version = ""
+#features = ["v2_44"]
+
