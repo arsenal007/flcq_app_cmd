@@ -1,27 +1,39 @@
 extern crate rustop;
 
 use rustop::opts;
+mod flcq {
+    mod animation;
+    pub mod calibration;
+    pub mod capacity;
+    pub mod com;
+    mod converters;
+    pub mod eeprom;
+    mod f1f2;
+    mod freq;
+    mod lc;
+    pub mod measurements;
+    pub mod serial;
+    mod timeout;
+}
 
-mod calibration;
-mod measurements;
-
-use self::measurements::lc::freq::com;
-use self::measurements::lc::freq::com::eeprom::S;
+use flcq::eeprom::S;
 
 fn usage() {
     println!("Usage examples:");
     println!("  calibration:");
-    println!("    frequency: ./flcq.exe --calibration --frequency --frequency-periode-count 254 --com COM1 --ref-frequency 1000000");
-    println!("    capacitance: ./flcq.exe --calibration --capacitance --com COM1 --cref1 1000 --cref2 47");
-    println!(
-        "    inductance: ./flcq.exe --calibration --inductance --com COM1 --cref1 1000 --cref2 47"
-    );
+    println!("    frequency: ./flcq.exe --calibration --frequency --frequency-periode-count 254 --ref-frequency 1000000");
+    println!("    capacity: ./flcq.exe --calibration --capacity  --cref1 1000 --cref2 47");
+    println!("    induction: ./flcq.exe --calibration --induction --cref1 1000 --cref2 47");
+    println!("    induction: ./flcq.exe --calibration --quartz");
 
     println!("  measurements:");
-    println!("    frequency: ./flcq.exe --frequency --com COM1");
-    println!("    capacitance: ./flcq.exe --capacitance --com COM1");
-    println!("    inductance : ./flcq.exe  --inductance --com COM1 ");
+    println!("    frequency: ./flcq.exe --frequency");
+    println!("    capacity: ./flcq.exe --capacity");
+    println!("    induction : ./flcq.exe  --induction");
+    println!("    induction : ./flcq.exe  --quartz");
 }
+
+use crate::flcq::{calibration, com, measurements};
 
 fn main() {
     let parser = opts! {
@@ -35,13 +47,14 @@ fn main() {
         opt com:Option<String>, desc:"COM Port string"; // an optional (positional) parameter
         opt calibration:bool, desc:"calibration";
         opt frequency:bool, desc:"frequency";
-        opt capacitance:bool, desc:"capacitance";
-        opt inductance:bool, desc:"inductance";
+        opt capacity:bool, desc:"capacity";
+        opt induction:bool, desc:"induction";
         opt show_saved:bool, desc:"show-saved";
         opt clear_saved:bool, desc:"clear-saved";
         opt quartz:bool, desc:"crystal quartz";
-        opt cref1:Option<u16>, desc:"ref Capacitance 1";
-        opt cref2:Option<u16>, desc:"ref Capacitance 2";
+        opt quartz_capacity: bool, desc:"quartz capacity [Cq]";
+        opt cref1:Option<u16>, desc:"ref capacity 1";
+        opt cref2:Option<u16>, desc:"ref capacity 2";
              opt frequency_periode_count:Option<u8>, desc:"frequency calibration periode count: max count, 1..254, one count approx 0.1048576 Sec";
         opt ref_frequency:Option<u32>, desc:"frequency calibration: ref frequency [kHz]";
     };
@@ -50,13 +63,16 @@ fn main() {
 
     let (args, _rest) = parser.parse_or_exit();
 
-    if let Some(com) = args.com {
+    if let Some((com, _hw, _fw)) = flcq::serial::Detect::run()
+    //if let Some(com) = args.com
+    {
         if args.calibration {
             calibration::calibration(
                 com,
                 args.frequency,
-                args.capacitance,
-                args.inductance,
+                args.capacity,
+                args.induction,
+                args.quartz,
                 args.ref_frequency,
                 args.frequency_periode_count,
                 args.cref1,
@@ -64,15 +80,17 @@ fn main() {
             );
         } else if args.frequency {
             measurements::frequency(&com);
-        } else if args.capacitance {
-            measurements::capacitance(&com);
-        } else if args.inductance {
-            measurements::inductance(&com);
+        } else if args.capacity {
+            measurements::capacity(&com);
+        } else if args.induction {
+            measurements::induction(&com);
+        } else if args.quartz {
+            measurements::quartz(&com, args.quartz_capacity);
         } else if args.show_saved {
-            let flcq: com::Flcq = com::open(&com, false);
+            let flcq = com::open(&com, false);
             flcq.show();
         } else if args.clear_saved {
-            let mut flcq: com::Flcq = com::open(&com, false);
+            let mut flcq = com::open(&com, false);
             flcq.clear();
         }
     }

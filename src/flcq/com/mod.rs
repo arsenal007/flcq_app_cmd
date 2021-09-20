@@ -1,18 +1,7 @@
 extern crate clap;
 extern crate serialport;
 
-//use std::io::{self, Write};
-//use std::time::Duration;
-
-//use serialport::prelude::*;
-#[path = "calc.rs"]
-mod calc;
-#[path = "eeprom.rs"]
-pub mod eeprom;
-#[path = "serial_timeout.rs"]
-mod timeout;
-
-use self::eeprom::{C, F, L, R, S, W};
+use crate::flcq::eeprom::{self, C, F, L, Q, R, S, W};
 
 fn timeout_msg<T: std::fmt::Display>(
     port: &Box<dyn serialport::SerialPort>,
@@ -69,21 +58,6 @@ impl Flcq {
                 eprintln!("Failed to open \"{}\". Error: {}", port_name, e);
                 ::std::process::exit(1);
             }
-        }
-    }
-}
-
-impl Flcq {
-    pub fn disconnect(&mut self) {
-        self.port = None;
-    }
-}
-
-impl Flcq {
-    pub fn is_init(&self) -> bool {
-        match &self.port {
-            Some(_) => true,
-            None => false,
         }
     }
 }
@@ -151,8 +125,6 @@ impl Flcq {
     fn frequency_count(&mut self, count: u8) -> Option<(f64, f64)> {
         let mut res = None;
         let freq = self.frequency_raw(&count);
-        println!("self.frequency_raw(&count)");
-
         if let (Some(f), _) = freq {
             let (_prescaler, fl) = f;
             let true_count = self.eeprom.frequency_count();
@@ -177,6 +149,34 @@ impl Flcq {
 }
 
 impl Flcq {
+    pub fn quartz_crefs(&self) -> (f64, f64, f64, f64) {
+        (
+            self.eeprom.q_cref(),
+            self.eeprom.q_cswitch(),
+            self.eeprom.q_cref1(),
+            self.eeprom.q_cref2(),
+        )
+    }
+}
+
+mod calculation {
+    pub fn frequency(prescaler: u8, tmr0: u8, overflows_array: [u8; 4]) -> f64 {
+        let overflows: u32;
+        unsafe {
+            overflows = std::mem::transmute::<[u8; 4], u32>(overflows_array);
+        }
+        let prescaler_values = [1.0f64, 2.0f64, 4.0f64, 8.0f64, 16.0f64];
+        println!(
+            "Overflows: {}, PSC: {},  Count: {}",
+            overflows,
+            prescaler_values[(prescaler + 1u8) as usize],
+            tmr0 as f64
+        );
+        prescaler_values[(prescaler + 1u8) as usize] * (256.0f64 * overflows as f64 + tmr0 as f64)
+    }
+}
+
+impl Flcq {
     // continue frequency
     pub fn frequency_raw(&mut self, count: &u8) -> (Option<(u8, f64)>, std::string::String) {
         let n = count.clone();
@@ -193,7 +193,7 @@ impl Flcq {
                                         (
                                             Some((
                                                 read_data[1],
-                                                calc::frequency(
+                                                calculation::frequency(
                                                     read_data[1],
                                                     read_data[2],
                                                     [
@@ -259,23 +259,52 @@ extern crate question;
 use self::question::{Answer, Question};
 
 impl Flcq {
-    pub fn set_cref1_cref2(&mut self, cref: f64) {
-        if let Some(Answer::YES) = Question::new("Set as CREF1")
-            .yes_no()
-            .until_acceptable()
-            .default(Answer::YES)
-            .show_defaults()
+    fn set_lc_crefs_execute(&mut self, a: std::string::String, c: f64) {
+        if a == "1" {
+            self.eeprom.set_cref1(c);
+        } else if a == "2" {
+            self.eeprom.set_cref2(c);
+        }
+    }
+
+    pub fn set_lc_crefs(&mut self, cref: f64) {
+        let vec = vec!["1", "2", "3", "4", "5", "6"];
+        println!("LC:");
+        println!("  1) set as Cref1");
+        println!("  2) Set as Cref2");
+        if let Some(Answer::RESPONSE(ans)) = Question::new("please press [1..2], then Enter:")
+            .acceptable(vec)
             .ask()
         {
-            self.eeprom.set_cref1(cref);
-        } else if let Some(Answer::YES) = Question::new("Set as CREF2")
-            .yes_no()
-            .until_acceptable()
-            .default(Answer::YES)
-            .show_defaults()
+            self.set_lc_crefs_execute(ans, cref);
+        }
+    }
+
+    fn i_set_quartz_crefs(&mut self, a: std::string::String, c: f64) {
+        if a == "1" {
+            self.eeprom.set_cq(c);
+        } else if a == "2" {
+            self.eeprom.set_cswitch(c);
+        } else if a == "3" {
+            self.eeprom.set_q_cref1(c);
+        } else if a == "4" {
+            self.eeprom.set_q_cref2(c);
+        }
+    }
+
+    pub fn set_quartz_crefs(&mut self, cref: f64) {
+        let vec = vec!["1", "2", "3", "4"];
+        println!("Quartz Crystal:");
+        println!("  1) Cq - quartz crystal capacity");
+        println!("  2) Cs - switch capacitor");
+        println!("  3) set as Cref1");
+        println!("  4) set as Cref2");
+
+        if let Some(Answer::RESPONSE(ans)) = Question::new("please press [1..4], then Enter:")
+            .acceptable(vec)
             .ask()
         {
-            self.eeprom.set_cref2(cref);
+            self.i_set_quartz_crefs(ans, cref);
         }
     }
 }
@@ -322,21 +351,9 @@ impl Drop for Flcq {
     }
 }
 
-pub fn ports() -> std::result::Result<std::vec::Vec<serialport::SerialPortInfo>, serialport::Error>
-{
-    serialport::available_ports()
-}
-
 pub fn open<T: std::fmt::Display + AsRef<std::ffi::OsStr> + ?Sized>(
     v: &T,
     calibration: bool,
 ) -> Flcq {
     Flcq::new(v, calibration)
 }
-
-/*pub fn init() -> Flcq {
-    Flcq {
-        port: None,
-        eeprom: Box::new(eeprom::TEeprom::default()),
-    }
-}*/

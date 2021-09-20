@@ -1,5 +1,145 @@
-#[path = "serial_timeout.rs"]
-mod timeout;
+pub trait F {
+    fn frequency_periode(&self) -> f64;
+    fn frequency_calibration_temperature(&self) -> f64;
+    fn frequency_count(&self) -> u8;
+    fn set_frequency(&mut self, periode: f64, temperature: f64, count: u8) -> ();
+}
+
+pub trait L {
+    fn c0_l0(&self) -> (f64, f64);
+    fn set_c0_l0(&mut self, c0: f64, l0: f64) -> ();
+}
+
+pub trait C {
+    fn cref1(&self) -> f64;
+    fn cref2(&self) -> f64;
+    fn set_cref1(&mut self, cref1: f64) -> ();
+    fn set_cref2(&mut self, cref2: f64) -> ();
+}
+
+pub trait Q {
+    fn q_cref(&self) -> f64;
+    fn set_cq(&mut self, v: f64);
+    fn q_cswitch(&self) -> f64;
+    fn set_cswitch(&mut self, v: f64);
+    fn q_cref1(&self) -> f64;
+    fn set_q_cref1(&mut self, v: f64);
+    fn q_cref2(&self) -> f64;
+    fn set_q_cref2(&mut self, v: f64);
+}
+
+pub trait R {
+    fn read(&mut self, port: &mut Box<dyn serialport::SerialPort>) -> ();
+}
+
+pub trait W {
+    fn write(&mut self, port: &mut Box<dyn serialport::SerialPort>) -> ();
+}
+
+pub trait S {
+    fn show(&self) -> ();
+}
+
+mod crystal_quartz {
+    use super::{TEeprom, Q, R, S, W};
+    pub struct Quartz {
+        q_cref: f64,
+        q_cswitch: f64,
+        q_cref1: f64,
+        q_cref2: f64,
+    }
+
+    impl Default for Quartz {
+        fn default() -> Self {
+            Self {
+                q_cref: super::f64_default(),
+                q_cswitch: super::f64_default(),
+                q_cref1: super::f64_default(),
+                q_cref2: super::f64_default(),
+            }
+        }
+    }
+
+    impl Q for Quartz {
+        fn q_cref(&self) -> f64 {
+            self.q_cref
+        }
+
+        fn set_cq(&mut self, v: f64) {
+            self.q_cref = v;
+        }
+
+        fn q_cswitch(&self) -> f64 {
+            self.q_cswitch
+        }
+
+        fn set_cswitch(&mut self, v: f64) {
+            self.q_cswitch = v;
+        }
+
+        fn q_cref1(&self) -> f64 {
+            self.q_cref1
+        }
+
+        fn set_q_cref1(&mut self, v: f64) {
+            self.q_cref1 = v;
+        }
+
+        fn q_cref2(&self) -> f64 {
+            self.q_cref2
+        }
+
+        fn set_q_cref2(&mut self, v: f64) {
+            self.q_cref2 = v;
+        }
+    }
+
+    impl R for Quartz {
+        fn read(&mut self, port: &mut Box<dyn serialport::SerialPort>) -> () {
+            // crystal quartz parasitic own capicatance between pins
+            self.q_cref = TEeprom::read_f64(port, &TEeprom::Q_CREF);
+
+            // calibration capicator for F1/F2
+            self.q_cswitch = TEeprom::read_f64(port, &TEeprom::Q_CSWITCH);
+
+            // capicator C1 in emmiter
+            self.q_cref1 = TEeprom::read_f64(port, &TEeprom::Q_CREF1);
+
+            // capicator C1 in emmiter
+            self.q_cref2 = TEeprom::read_f64(port, &TEeprom::Q_CREF2);
+        }
+    }
+
+    impl W for Quartz {
+        fn write(&mut self, port: &mut Box<dyn serialport::SerialPort>) -> () {
+            // crystal quartz parasitic own capicatance between pins
+            TEeprom::write_f64(port, &TEeprom::Q_CREF, &self.q_cref);
+
+            // calibration capicator for F1/F2
+            TEeprom::write_f64(port, &TEeprom::Q_CSWITCH, &self.q_cswitch);
+
+            // capicator C1 in emmiter
+            TEeprom::write_f64(port, &TEeprom::Q_CREF1, &self.q_cref1);
+
+            // capicator C1 in emmiter
+            TEeprom::write_f64(port, &TEeprom::Q_CREF2, &self.q_cref2);
+        }
+    }
+
+    impl S for Quartz {
+        fn show(&self) -> () {
+            println!("Quartz crystal: ");
+            println!("  quartz crystal own capacity = {:?} pF", self.q_cref);
+            println!(
+                "  switch capacity in G3UUR schema = {:?} pF",
+                self.q_cswitch
+            );
+
+            println!("   C1 capacity G3UUR = {:?} pF", self.q_cref1);
+            println!("   C2 capacity G3UUR = {:?} pF", self.q_cref2);
+        }
+    }
+}
 
 struct Freq {
     frequency_periode: f64,
@@ -7,47 +147,45 @@ struct Freq {
     frequency_calibration_count: u8,
 }
 
-struct Q {
-    q_cref1: f64,
-    q_cref2: f64,
-    q_cref3: f64,
-}
-
-struct Capacitance {
+struct capacity {
     cref1: f64,
     n_cref1: u8,
     cref2: f64,
     n_cref2: u8,
 }
 
-struct Inductance {
+struct induction {
     c0: f64,
     l0: f64,
     n_c0_l0: u8,
 }
 
 pub struct TEeprom {
+    sn: u8,
     freq: Freq,
-    c: Capacitance,
-    l: Inductance,
-    q_cref1: f64,
+    c: capacity,
+    l: induction,
+    q: crystal_quartz::Quartz,
 }
 
 impl TEeprom {
     // addresses in eeprom
-    const FREQUENCY_PERIODE: u8 = 0u8; // 9
+    const SERIAL_NUMBER: u8 = 0u8; // u8
+    const FREQUENCY_PERIODE: u8 = 1u8; // 9
     const CALIBRATION_TEMPERATURE: u8 = Self::FREQUENCY_PERIODE + 8u8; // 49
     const N_CALIBRATION_FREQUENCY_COUNT: u8 = Self::CALIBRATION_TEMPERATURE + 8u8; // 82
-
     const C0_SUM: u8 = Self::N_CALIBRATION_FREQUENCY_COUNT + 1u8; // f64
     const L0_SUM: u8 = Self::C0_SUM + 8u8; // f64
     const C0_L0_N: u8 = Self::L0_SUM + 8u8; // f64
-    const CREF1_SUM: u8 = Self::C0_L0_N + 1u8;
-    const CREF1_N: u8 = Self::CREF1_SUM + 8u8;
-    const CREF2_SUM: u8 = Self::CREF1_N + 1u8;
-    const CREF2_N: u8 = Self::CREF2_SUM + 8u8;
-    const CREF1_Q: u8 = Self::CREF2_N + 1u8;
-    const SIZE: u8 = Self::CREF1_Q + 8u8;
+    const CREF1_SUM: u8 = Self::C0_L0_N + 1u8; // f64
+    const CREF1_N: u8 = Self::CREF1_SUM + 8u8; // u8
+    const CREF2_SUM: u8 = Self::CREF1_N + 1u8; // f64
+    const CREF2_N: u8 = Self::CREF2_SUM + 8u8; // u8
+    const Q_CREF: u8 = Self::CREF2_N + 1u8; // f64
+    const Q_CSWITCH: u8 = Self::Q_CREF + 8u8; // f64
+    const Q_CREF1: u8 = Self::Q_CSWITCH + 8u8; // f64
+    const Q_CREF2: u8 = Self::Q_CREF1 + 8u8; // f64
+    const SIZE: u8 = Self::Q_CREF2 + 8u8;
 }
 
 fn f64_default() -> f64 {
@@ -64,7 +202,7 @@ impl Default for Freq {
     }
 }
 
-impl Default for Capacitance {
+impl Default for capacity {
     fn default() -> Self {
         Self {
             cref1: f64_default(),
@@ -75,7 +213,7 @@ impl Default for Capacitance {
     }
 }
 
-impl Default for Inductance {
+impl Default for induction {
     fn default() -> Self {
         Self {
             c0: f64_default(),
@@ -88,43 +226,13 @@ impl Default for Inductance {
 impl Default for TEeprom {
     fn default() -> Self {
         Self {
+            sn: u8::default(),
             freq: Freq::default(),
-            c: Capacitance::default(),
-            l: Inductance::default(),
-            q_cref1: f64_default(),
+            c: capacity::default(),
+            l: induction::default(),
+            q: crystal_quartz::Quartz::default(),
         }
     }
-}
-
-pub trait L {
-    fn c0_l0(&self) -> (f64, f64);
-    fn set_c0_l0(&mut self, c0: f64, l0: f64) -> ();
-}
-
-pub trait F {
-    fn frequency_periode(&self) -> f64;
-    fn frequency_calibration_temperature(&self) -> f64;
-    fn frequency_count(&self) -> u8;
-    fn set_frequency(&mut self, periode: f64, temperature: f64, count: u8) -> ();
-}
-
-pub trait C {
-    fn cref1(&self) -> f64;
-    fn cref2(&self) -> f64;
-    fn set_cref1(&mut self, cref1: f64) -> ();
-    fn set_cref2(&mut self, cref2: f64) -> ();
-}
-
-pub trait R {
-    fn read(&mut self, port: &mut Box<dyn serialport::SerialPort>) -> ();
-}
-
-pub trait W {
-    fn write(&mut self, port: &mut Box<dyn serialport::SerialPort>) -> ();
-}
-
-pub trait S {
-    fn show(&self) -> ();
 }
 
 impl F for Freq {
@@ -194,7 +302,7 @@ impl S for Freq {
     }
 }
 
-impl C for Capacitance {
+impl C for capacity {
     fn cref1(&self) -> f64 {
         self.cref1 / self.n_cref1 as f64
     }
@@ -224,7 +332,7 @@ impl C for Capacitance {
     }
 }
 
-impl R for Capacitance {
+impl R for capacity {
     fn read(&mut self, port: &mut Box<dyn serialport::SerialPort>) -> () {
         // CREF1
         {
@@ -239,7 +347,7 @@ impl R for Capacitance {
     }
 }
 
-impl W for Capacitance {
+impl W for capacity {
     fn write(&mut self, port: &mut Box<dyn serialport::SerialPort>) -> () {
         // CREF1
         {
@@ -255,16 +363,17 @@ impl W for Capacitance {
     }
 }
 
-impl S for Capacitance {
+impl S for capacity {
     fn show(&self) {
+        println!("capacity Refs:");
         println!(
-            "       cref1 = {:?},  n_cref1 = {:?}, cref2 = {:?}, n_cref2 = {:?}",
+            "       Cref1 = {:?} pF,  N_cref1 = {:?}, Cref2 = {:?} pF, N_cref2 = {:?}",
             self.cref1, self.n_cref1, self.cref2, self.n_cref2
         );
     }
 }
 
-impl L for Inductance {
+impl L for induction {
     fn c0_l0(&self) -> (f64, f64) {
         (self.c0 / self.n_c0_l0 as f64, self.l0 / self.n_c0_l0 as f64)
     }
@@ -282,7 +391,7 @@ impl L for Inductance {
     }
 }
 
-impl R for Inductance {
+impl R for induction {
     fn read(&mut self, port: &mut Box<dyn serialport::SerialPort>) -> () {
         // C0, L0
         self.c0 = TEeprom::read_f64(port, &TEeprom::C0_SUM);
@@ -293,7 +402,7 @@ impl R for Inductance {
     }
 }
 
-impl W for Inductance {
+impl W for induction {
     fn write(&mut self, port: &mut Box<dyn serialport::SerialPort>) -> () {
         // C0, L0
         TEeprom::write_f64(port, &TEeprom::C0_SUM, &self.c0);
@@ -304,10 +413,11 @@ impl W for Inductance {
     }
 }
 
-impl S for Inductance {
+impl S for induction {
     fn show(&self) {
+        println!("induction:");
         println!(
-            "       c0 = {:?},  l0 = {:?}, n = {:?} ",
+            "       C0 = {:?} pF,  L0 = {:?} µH, N = {:?}",
             self.c0, self.l0, self.n_c0_l0
         );
     }
@@ -362,6 +472,7 @@ impl S for TEeprom {
         self.freq.show();
         self.c.show();
         self.l.show();
+        self.q.show();
     }
 }
 
@@ -371,7 +482,7 @@ impl R for TEeprom {
         self.freq.read(port);
         // capicatance
         self.c.read(port);
-        // inductance
+        // induction
         self.l.read(port);
     }
 }
@@ -382,21 +493,57 @@ impl W for TEeprom {
         self.freq.write(port);
         // capicatance
         self.c.write(port);
-        // inductance
+        // induction
         self.l.write(port);
 
         println!("writed");
     }
 }
 
+impl Q for TEeprom {
+    fn q_cref(&self) -> f64 {
+        self.q.q_cref()
+    }
+
+    fn set_cq(&mut self, v: f64) {
+        self.q.set_cq(v);
+    }
+
+    fn q_cswitch(&self) -> f64 {
+        self.q.q_cswitch()
+    }
+
+    fn set_cswitch(&mut self, v: f64) {
+        self.q.set_cswitch(v);
+    }
+
+    fn q_cref1(&self) -> f64 {
+        self.q.q_cref1()
+    }
+
+    fn set_q_cref1(&mut self, v: f64) {
+        self.q.set_q_cref1(v);
+    }
+
+    fn q_cref2(&self) -> f64 {
+        self.q.q_cref2()
+    }
+
+    fn set_q_cref2(&mut self, v: f64) {
+        self.q.set_q_cref2(v);
+    }
+}
+
 impl TEeprom {
     pub fn clear(&mut self, port: &mut Box<dyn serialport::SerialPort>) -> () {
-        for i in 0..128 {
+        for i in 1..128 {
             let d: u8 = 0xFF;
             Self::write_byte(port, &i, &d);
         }
     }
 }
+
+use crate::flcq::timeout;
 
 impl TEeprom {
     fn read_byte(port: &mut Box<dyn serialport::SerialPort>, address: &u8) -> u8 {
